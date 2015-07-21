@@ -1,0 +1,52 @@
+# Note: if you are using Sublime Text, then I recommend you to switch the syntax highlighting
+# from JSON to Bash.
+{
+    # The hostname of the current server. It should be valid and reachable.
+    "this_server": "srv1.example.com",
+    # The hostname of the other server. It should also be valid and reachable.
+    "other_server": "srv2.example.com",
+    # The key used to generate the authorization strings. It must be the same on both the
+    # client and the server.
+    "key": "fancy_key",
+    # Select if this instance is going to be a client or a server: uncomment only the block
+    # you are interested in. This instance is configured as a server by default.
+    # Bind options.
+    # https://metacpan.org/pod/Mojo::IOLoop::Server#listen
+    "server": {
+        "port": 4096,
+        "backlog": 2
+    },
+    # Connect options.
+    # https://metacpan.org/pod/Mojo::IOLoop::Client#connect
+    #"client": {
+    #    "address": "srv2.example.com",
+    #    "port": 4096
+    #},
+    # Cloudflare configuration. Required.
+    "cloudflare": {
+        # Your API key. Get it from the profile page.
+        "key": "abcdef",
+        # The mail of your account.
+        "mail": "webmaster@example.com",
+        # The domain name.
+        "zone": "example.com",
+        # The record you want to be updated.
+        "record": "cluster.example.com",
+        # The preferred value of the record. This is used when both servers are back online.
+        "preferred_value": "srv1.example.com"
+    },
+    # Pushbullet configuration. Remove/comment this block if you don't need it.
+    "pushbullet": {
+        # Your API key. Get it from the profile page.
+        "key": "abcdef",
+        # Where the pushes will be sent to. See https://docs.pushbullet.com/#pushes, and README.md
+        # This is optional - if you don't specify any of these options, the push will be
+        # broadcasted to all of your devices.
+        "target": {
+            #"device_iden": "...",
+            #"email": "...",
+            #"channel_tag": "...",
+            #"client_iden": "..."
+        }
+    }
+}
