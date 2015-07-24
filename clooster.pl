@@ -5,6 +5,8 @@ use File::Basename ();
 use JSON::MaybeXS;
 use Mojo::IOLoop;
 
+$|++;
+
 # Find the configuration path
 my $conf_path = $ARGV[0] || (File::Basename::fileparse $0, qr/\.[^.]*/)[0] . ".json";
 die "ERROR: $conf_path does not exist\n" unless -e $conf_path;
@@ -49,7 +51,7 @@ Mojo::IOLoop->client ($conf->{client} => sub {
         $loop->stop;
         die "ERROR: $err\n";
     }
-    say "Successfully connected to ", $stream->handle->sockhostname;
+    say "Successfully connected to ", $stream->handle->peerhostname;
     register_event_handlers ($loop, $stream);
 }) if $is_client;
 

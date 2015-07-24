@@ -105,6 +105,8 @@ except that the record is changed to the value of `cloudflare.preferred_value` i
 You can write an init script for your system init daemon. Systemd can do
 [this and much more](https://wiki.archlinux.org/index.php/Systemd#Writing_unit_files).
 
+An example unit file for systemd is provided with the script. See `clooster.service`.
+
 ### How do I retrieve the `device_iden` required to push to single devices?
 
 You have to use a tool like `curl` from the command line to perform the task.

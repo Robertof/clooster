@@ -1,0 +1,15 @@
+[Unit]
+Description=clooster daemon
+Documentation=https://github.com/Robertof/clooster
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env perl /path/to/clooster /path/to/config
+User=someuser
+Group=somegroup
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
