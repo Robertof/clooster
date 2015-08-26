@@ -67,18 +67,34 @@ Well, I was thinking about `cluster` and `max two servers` (2), so this name cam
 
 I'm not good at picking names.
 
+### What is that `fail2ban` directory for?
+
+Since version 1.1, an example [fail2ban](http://www.fail2ban.org/wiki/index.php/Main_Page)
+configuration is provided.
+The configuration enables automatic IP banning (by default, for 1 hour) of unknown clients that
+try to connect to the `clooster` server instance. Two attempts are sufficient for a ban to occur.
+
+For this to work, Clooster needs to be started by `systemd`, and its output has to be recorded
+by the journal (the default). See [How do I daemonize the script?](#how-do-i-daemonize-the-script)
+
+**NOTE:** before using the included files, you need to change the port Clooster listens on in
+`fail2ban/jail.d/10_clooster.conf`.
+
 ### How does it work?
 
 It's actually pretty simple. First and foremost, the script calls Cloudflare and gets the zone id
-and an object representing the record that will be updated. Then, the server binds on the address
-specified in the config and lets the client connect. Only **one** client is allowed at a time.
-Other connections are instantly terminated.
+and an object representing the record that will be updated. The server then performs a DNS lookup
+on the hostname of the other server, and saves the retrieved IP addresses for later.
+The server binds on the address specified in the config and lets the client connect.
+Only **one** client is allowed at a time. Other connections are instantly terminated.
 
-When the client successfully connects to the server, the authorization string is sent: it's the
-server name encoded with HMAC-SHA256 (the key is specified in the config). Nothing too fancy,
-it's just to ensure that the script is talking to the right server.
+When the client successfully connects to the server, its IP is checked by the server: if it
+does not exist in the list of IPs saved before, then the client is promptly rejected. The
+authorization string is now sent: it's simply the server name encoded with HMAC-SHA256
+(with the key specified in the configuration). Nothing too fancy, it's just one more way to ensure
+that the script is talking to the right server.
 
-Once the authorization is complete, the servers send a keep-alive string every 60 seconds to keep
+Once the authorization is complete, the script sends a keep-alive string every 60 seconds to keep
 the socket alive. The keep-alive string is the server name (`this_server` in the config).
 
 A watchdog runs every 120 seconds, and does the following:

@@ -4,8 +4,11 @@ use Digest::SHA;
 use File::Basename ();
 use JSON::MaybeXS;
 use Mojo::IOLoop;
+use Socket ();
+no if $] >= 5.017011, warnings => 'experimental::smartmatch';
 
 $|++;
+my $VERSION = "1.1";
 
 # Find the configuration path
 my $conf_path = $ARGV[0] || (File::Basename::fileparse $0, qr/\.[^.]*/)[0] . ".json";
@@ -27,17 +30,43 @@ die "ERROR: Missing Cloudflare configuration!\n" unless exists $conf->{cloudflar
 my ($is_client, $is_server) = map { exists $conf->{$_} } "client", "server";
 # $client_n: number of clients currently connected (must be 1)
 # $identity_ok: true if the client or server has authenticated successfully
-# $total_clients: the total number of clients the server has ever accepted
-# $last_keepalive: unix timestamp containing the last a keepalive was sent
+# $total_clients: the total number of clients the server has accepted
+# $last_keepalive: timestamp of the most recent keepalive
+#                  set to undef when the target server has died.
 my ($client_n, $identity_ok, $total_clients, $last_keepalive) = 0;
+# $emitter: Mojo::EventEmitter object used to manage the communication between the socket and the
+# watchdog.
+my $emitter    = Mojo::EventEmitter->new;
 my $cloudflare = Local::Cloudflare->new ($conf->{cloudflare});
 my $pushbullet = Local::Pushbullet->new ($conf->{pushbullet});
 
 say "Initializing...";
 
 # Pre-compute the authentication strings
-my ($my_authstring, $their_authstring) = map { Digest::SHA::hmac_sha256 ($_, $conf->{key}) }
-                                         $conf->{this_server}, $conf->{other_server};                                         
+my ($my_authstring, $his_authstring) = map { Digest::SHA::hmac_sha256 ($_, $conf->{key}) }
+                                       $conf->{this_server}, $conf->{other_server};
+
+# Resolve the address specified in $conf->{other_server}.
+my @his_addresses;
+if ($is_server)
+{
+    my $err;
+    ($err, @his_addresses) = Socket::getaddrinfo ($conf->{other_server}, undef, {
+        family   => Socket::AF_UNSPEC,
+        protocol => Socket::IPPROTO_TCP
+    });
+    die "ERROR: Can't resolve $conf->{other_server}: $err\n" unless defined $his_addresses[0];
+    for (my $i = 0; $i < scalar @his_addresses; $i++)
+    {
+        my $addr = $his_addresses[$i];
+        my (undef, $unpacked) = $addr->{family} == Socket::AF_INET ?
+            Socket::unpack_sockaddr_in ($addr->{addr}) :
+            Socket::unpack_sockaddr_in6 ($addr->{addr});
+        $his_addresses[$i] = Socket::inet_ntop ($addr->{family}, $unpacked);
+    }
+    say "$conf->{other_server} resolved to ", scalar @his_addresses, " IP(s)";
+}
+
 # Load the record & zone from Cloudflare
 $cloudflare->init;
 
@@ -57,7 +86,7 @@ Mojo::IOLoop->client ($conf->{client} => sub {
 
 Mojo::IOLoop->recurring (120 => \&watchdog);
 
-say "Starting.";
+say "Clooster v$VERSION starting up.";
 
 Mojo::IOLoop->start;
 
@@ -67,9 +96,17 @@ sub register_event_handlers
     $last_keepalive = 0 if $is_client; # keep $last_keepalive in a consistent state
     if ($is_server)
     {
+        my $reject;
+        # Get bad guys out of this server.
+        $reject = "the other server is already connected" if $client_n == 1;
+        $reject = "unknown IP address" unless $stream->handle->peerhost ~~ \@his_addresses;
+        if (defined $reject)
+        {
+            say "Rejecting client ", $stream->handle->peerhost, " ($reject)";
+            return $stream->close;
+        }
         say "Client connected: ", $stream->handle->peerhostname,
             " (", $stream->handle->peerhost, ")";
-        return $stream->close if $client_n == 1; # no event handlers are called in this case
         ++$client_n;
     }
     $stream->timeout (80);
@@ -83,28 +120,30 @@ sub register_event_handlers
         }
         else
         {
-            return $stream->close unless ct_equal ($their_authstring, $bytes);
-            say $is_server ? "Client": "Server", " authenticated successfully as ",
+            return $stream->close unless ct_equal ($his_authstring, $bytes);
+            say $is_server ? "Client" : "Server", " authenticated successfully as ",
                 $conf->{other_server};
             ++$identity_ok;
             $timer = $loop->recurring (60 => sub { # keep-alive sender
                 $stream->write ($conf->{this_server});
             });
             $last_keepalive = time;
-            if ($is_server)
-            {
-                up_handler() if $total_clients; # call up_handler() only after the first client
-                ++$total_clients;
-            }
+            up_handler() if $total_clients; # call up_handler() only after the first client
+            ++$total_clients;
         }
     });
-    $stream->on (close => sub {
+    $stream->once (close => sub {
         --$client_n if $is_server;
-        return unless $identity_ok;
-        $loop->remove ($timer);
-        --$identity_ok; # don't try to fool me!
+        $emitter->unsubscribe ("close");
+        $stream->unsubscribe ("read");
+        $loop->remove ($timer) if defined $timer;
         undef $last_keepalive;
-        down_handler()
+        say "Connection closed.";
+        down_handler ("stream closed") if $identity_ok;
+        undef $identity_ok;
+    });
+    $emitter->once (close => sub {
+        $stream->close
     });
 }
 
@@ -120,39 +159,43 @@ sub watchdog
     {
         $loop->client ($conf->{client} => sub {
             my ($loop, $err, $stream) = @_;
-            unless ($err)
-            {
-                # Yay, we're up & running again!
-                register_event_handlers ($loop, $stream);
-                up_handler()
-            }
+            register_event_handlers ($loop, $stream) unless $err;
         });
         return;
     }
     # If $last_keepalive is defined (finally!), check if not too much time has passed since the
     # last keepalive.
-    down_handler() if time() - $last_keepalive > 120;
+    if (time() - $last_keepalive > 120)
+    {
+        down_handler ("ping timeout");
+        $emitter->emit ("close")
+    }
 }
 
 # Called whenever a server is back online.
 sub up_handler
 {
-    handler ("up");
+    handler ("up")
 }
 
 # Called whenever a server is down.
 sub down_handler
 {
-    handler ("down");
+    handler ("down", @_)
 }
 
 # Generic handler (no redudant code in my home!)
 sub handler
 {
-    my $event = shift; # either 'up' or 'down'
-    say "Server $conf->{other_server} is now $event";
+    my ($event, $desc) = @_; # either 'up' or 'down'
+    state $flag = 0;
+    # avoid multiple, consecutive, down_handler calls
+    return if $flag and $event eq "down";
+    $flag = $event eq "down";
     my $new_record_value = $event eq "up" ?
         $cloudflare->preferred_record_value : $conf->{this_server};
+    $event .= " ($desc)" if $desc;
+    say "Server $conf->{other_server} is now $event.";
     $cloudflare->fetch_record (sub {
         my $record = shift;
         # if the record is up to date, just send a notification
@@ -161,7 +204,7 @@ sub handler
             $pushbullet->agent->start (
                 $pushbullet->send_note_tx (
                     title => sprintf ("[%s] Server '%s' is now %s",
-                             $conf->{this_server}, $conf->{other_server}, $event),
+                                 $conf->{this_server}, $conf->{other_server}, $event),
                     body  => "No record change is necessary"
                 ),
                 # Make the request async, but don't care about the result.
@@ -187,11 +230,11 @@ sub handler
                         title => sprintf ("[%s] Server '%s' is now %s%s",
                                  $conf->{this_server}, $conf->{other_server}, $event,
                                  $ok ? "" : ", but something went wrong while updating the record"),
-                        body  => $ok ?
-                                    sprintf
+                        body  => $ok
+                                    ? sprintf (
                                         "The address for '%s' has been changed to '%s'",
-                                            $record->{name}, $conf->{this_server} :
-                                        "Here's what went wrong: $@"
+                                            $record->{name}, $conf->{this_server}
+                                    ) : "Here's what went wrong: $@"
                     ),
                     sub {}
                 ) if $pushbullet->enabled;
