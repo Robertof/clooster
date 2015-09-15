@@ -150,11 +150,10 @@ TODO
 
 This is some of the stuff I'd add in another life:
 
-* add a version number :P
+* ~~add a version number :P~~ done!
 * command-line interface (with `Getopt::Long`)
 * conversion to the standard Perl application interface (`App::clooster` maybe?)
 * support for multiple servers
-* TLS support
 * modularity (support other DNS services and notification methods)
 
 License

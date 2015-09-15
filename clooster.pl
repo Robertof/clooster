@@ -8,7 +8,7 @@ use Socket ();
 no if $] >= 5.017011, warnings => 'experimental::smartmatch';
 
 $|++;
-my $VERSION = "1.1";
+my $VERSION = "1.2";
 
 # Find the configuration path
 my $conf_path = $ARGV[0] || (File::Basename::fileparse $0, qr/\.[^.]*/)[0] . ".json";
@@ -233,7 +233,7 @@ sub handler
                         body  => $ok
                                     ? sprintf (
                                         "The address for '%s' has been changed to '%s'",
-                                            $record->{name}, $conf->{this_server}
+                                            $record->{name}, $new_record_value
                                     ) : "Here's what went wrong: $@"
                     ),
                     sub {}
