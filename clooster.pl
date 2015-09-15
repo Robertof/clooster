@@ -8,7 +8,7 @@ use Socket ();
 no if $] >= 5.017011, warnings => 'experimental::smartmatch';
 
 $|++;
-my $VERSION = "1.2";
+my $VERSION = "1.1.1";
 
 # Find the configuration path
 my $conf_path = $ARGV[0] || (File::Basename::fileparse $0, qr/\.[^.]*/)[0] . ".json";
